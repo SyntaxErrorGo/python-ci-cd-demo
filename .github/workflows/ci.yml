@@ -1,0 +1,58 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  test-build-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -v
+
+      - name: Build Docker image
+        run: docker build -t python-ci-cd-demo:${{ github.sha }} .
+
+      - name: Start application with Docker Compose
+        run: docker compose up -d --build
+
+      - name: Wait for application healthcheck
+        run: |
+          for i in {1..20}; do
+            STATUS=$(docker inspect --format='{{json .State.Health.Status}}' python-ci-cd-demo 2>/dev/null || true)
+            if [ "$STATUS" = '"healthy"' ]; then
+              echo "Application is healthy"
+              exit 0
+            fi
+            echo "Waiting for application..."
+            sleep 3
+          done
+          docker compose logs
+          exit 1
+
+      - name: Check API response
+        run: curl --fail http://localhost:8000/health
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop containers
+        if: always()
+        run: docker compose down
